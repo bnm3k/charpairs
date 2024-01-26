@@ -1,5 +1,7 @@
 #![allow(unused_variables, dead_code)]
 
+use std::io::{self, BufRead, Write};
+
 enum Node {
     Pair((Box<Node>, Box<Node>)),
     Char(char),
@@ -91,10 +93,17 @@ impl Scanner {
         &self.tokens[self.i]
     }
 
-    fn take(&mut self) -> &Token {
-        let t = &self.tokens[self.i];
-        self.i += 1;
-        t
+    fn take(&mut self) -> eyre::Result<&Token> {
+        if let Some(t) = &self.tokens.get(self.i) {
+            self.i += 1;
+            Ok(t)
+        } else {
+            eyre::bail!("Incomplete input")
+        }
+    }
+
+    fn remaining(&self) -> usize {
+        self.tokens.len() - self.i
     }
 }
 
@@ -108,7 +117,12 @@ impl Parser {
     }
 
     fn parse(mut self) -> eyre::Result<Node> {
-        self.parse_node()
+        let res = self.parse_node();
+        if self.scanner.remaining() > 0 {
+            eyre::bail!("Unexpected extra tokens");
+        } else {
+            res
+        }
     }
 
     fn parse_node(&mut self) -> eyre::Result<Node> {
@@ -121,7 +135,7 @@ impl Parser {
     }
 
     fn parse_char(&mut self) -> eyre::Result<Node> {
-        if let Token::Char(c) = self.scanner.take() {
+        if let Token::Char(c) = self.scanner.take()? {
             Ok(Node::Char(*c))
         } else {
             eyre::bail!("Expected a Char")
@@ -130,20 +144,30 @@ impl Parser {
 
     fn parse_pair(&mut self) -> eyre::Result<Node> {
         // LPAREN NODE SPACE_TOKEN NODE RPAREN
-        self.scanner.take().expect_lparen()?;
+        self.scanner.take()?.expect_lparen()?;
         let left = Box::new(self.parse_node()?);
-        self.scanner.take().expect_space()?;
+        self.scanner.take()?.expect_space()?;
         let right = Box::new(self.parse_node()?);
-        self.scanner.take().expect_rparen()?;
+        self.scanner.take()?.expect_rparen()?;
         Ok(Node::Pair((left, right)))
     }
 }
 
 fn main() -> eyre::Result<()> {
-    let input = "(a b)";
-    let tokens = lex(input);
-    let parser = Parser::new(Scanner::new(tokens));
-    let res = parser.parse()?;
-    println!("{}", res);
-    Ok(())
+    let mut stdin = io::stdin().lock();
+    let mut line = String::new();
+    loop {
+        print!("> ");
+        io::stdout().flush()?;
+        stdin.read_line(&mut line)?;
+        let input = &line[..line.len() - 1]; // ignore newline
+        let tokens = lex(&input);
+        let scanner = Scanner::new(tokens);
+        let parser = Parser::new(scanner);
+        match parser.parse() {
+            Err(e) => println!("Error: {}", e),
+            Ok(result) => print!("{}", result),
+        }
+        line.clear();
+    }
 }
